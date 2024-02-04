@@ -4,12 +4,10 @@ namespace app\console;
 
 use app\helpers\FileHelper;
 use app\helpers\LogHelper;
-use app\helpers\PostindexHelper;
 use app\models\PostIndex;
 use Box\Spout\Reader\Common\Creator\ReaderEntityFactory;
 
 require __DIR__ . '/../vendor/autoload.php';
-require __DIR__ . '/../components/autoloader.php';
 
 $postmanUrl = 'https://www.ukrposhta.ua/files/shares/out/postindex.zip';
 $pathPostindex = __DIR__ . '/../public/files/';
@@ -84,7 +82,8 @@ try {
 
 } catch (\Exception $e) {
     LogHelper::consoleError($e->getMessage());
-}catch (\PDOException $e) {
+} catch (\PDOException $e) {
     LogHelper::consoleError("Error on DB: " . $e->getMessage());
 }
 
+echo (new \DateTime())->format('Y-m-d H:i:s') . PHP_EOL;
