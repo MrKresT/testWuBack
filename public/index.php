@@ -149,7 +149,7 @@ $app->get('/postindex/{post_office_id}', function (Request $request, Response $r
 });
 
 
-$app->post('/postindex/add', function (Request $request, Response $response, $args) {
+$app->post('/postindex/add', function (Request $request, Response $response) {
     try {
         $db = \app\models\DBConnection::connect();
         $modelPostIndex = new \app\models\PostIndex($db);
@@ -180,7 +180,7 @@ $app->post('/postindex/add', function (Request $request, Response $response, $ar
     return $response;
 });
 
-$app->delete('/postindex/{post_office_id}', function (Request $request, Response $response, $args) {
+$app->delete('/postindex/{post_office_id}', function (Request $request, Response $response) {
     try {
         $db = \app\models\DBConnection::connect();
         $modelPostIndex = new \app\models\PostIndex($db);
