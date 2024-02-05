@@ -71,6 +71,7 @@ class PostIndex
         'region_ukr' => [
             'type' => 'varchar(255)',
             'columnXLSX' => 'Область',
+            'addressFieldOrder' => 4,
         ],
         'district_old_ukr' => [
             'type' => 'varchar(255)',
@@ -79,10 +80,12 @@ class PostIndex
         'district_new_ukr' => [
             'type' => 'varchar(255)',
             'columnXLSX' => 'Район (новий)',
+            'addressFieldOrder' => 3,
         ],
         'settlement_ukr' => [
             'type' => 'varchar(255)',
             'columnXLSX' => 'Населений пункт',
+            'addressFieldOrder' => 2,
         ],
         'postal_code' => [
             'type' => 'varchar(5)',
@@ -103,6 +106,7 @@ class PostIndex
         'post_office_ukr' => [
             'type' => 'varchar(255)',
             'columnXLSX' => 'Вiддiлення зв`язку',
+            'addressFieldOrder' => 1,
         ],
         'post_office_en' => [
             'type' => 'varchar(255)',
@@ -140,6 +144,67 @@ class PostIndex
             ],
         ],
     ];
+
+    /**
+     * Gets the name of the table associated with this object.
+     *
+     * @return string The name of the table.
+     */
+    public function getTableName()
+    {
+        return $this->tableName;
+    }
+
+    /**
+     * Returns the field key.
+     *
+     * @return string The field key.
+     */
+    public function getFieldKey()
+    {
+        return $this->fieldKey;
+    }
+
+    /**
+     * Creates an array of address fields based on the specified fields configuration.
+     *
+     * @return array An array containing the address fields in the order specified by the 'addressFieldOrder' value in the fields configuration.
+     */
+    protected function arrayOfAddressFields()
+    {
+        $arrAddr = [];
+        foreach ($this->fields as $key => $value) {
+            if (isset($value['addressFieldOrder'])) {
+                $arrAddr[$value['addressFieldOrder']] = $key;
+            }
+        }
+        return $arrAddr;
+    }
+
+    /**
+     * Gets the expression for the address field.
+     *
+     * @return string The expression for the address field.
+     */
+    public function getExpressionAddressField()
+    {
+        $strAddr = '';
+        foreach ($this->arrayOfAddressFields() as $value) {
+            $strAddr .= ($strAddr === '' ? '' : "', ',") . $value . ',';
+        }
+        $strAddr = substr($strAddr, 0, -1);
+        return "CONCAT({$strAddr})";
+    }
+
+    /**
+     * Retrieves an array of address fields.
+     *
+     * @return array An array containing all the address fields.
+     */
+    public function getAddressFields()
+    {
+        return array_values($this->arrayOfAddressFields());
+    }
 
     protected function setCreatedManual()
     {
@@ -335,6 +400,14 @@ class PostIndex
         $withConsoleLog && LogHelper::consoleMessage('Rows: ' . $rowIndexCurrent);
     }
 
+    /**
+     * Checks if a row should be skipped and applies the skip if necessary.
+     *
+     * @param array $rowSkipped The array representing the row to check for skipping.
+     * @param bool $mustHave (optional) Whether all columns must be skipped or not. Default is false.
+     *
+     * @return bool Returns true if the row was skipped, false otherwise.
+     */
     protected function checkAndApllySkipRow($rowSkipped, $mustHave = false)
     {
         $res = false;
@@ -391,12 +464,23 @@ class PostIndex
         $this->_db->exec($sql . $condition);
     }
 
-    protected function getAllFields()
+    /**
+     * Retrieves all fields from the class.
+     *
+     * @return array Returns an array containing all the fields and required fields.
+     */
+    public function getAllFields()
     {
         return array_merge($this->fields, $this->requiredFields);
     }
 
-    protected function generateInsertQuery()
+
+    /**
+     * Generates the INSERT query for inserting data into the specified table.
+     *
+     * @return string The generated INSERT query.
+     */
+    public function generateInsertQuery()
     {
         $sql = "INSERT INTO `{$this->tableName}` (";
         $sql .= implode(',', array_keys($this->getAllFields()));
@@ -409,7 +493,16 @@ class PostIndex
         return $sql;
     }
 
-    protected function generateUpdateQuery($keyValue, $row)
+
+    /**
+     * Generates an SQL UPDATE query.
+     *
+     * @param mixed $keyValue The value of the key field to search for, or an array of values to search for in a list.
+     * @param array $row The data to be updated in the table.
+     *
+     * @return string The SQL UPDATE query.
+     */
+    public function generateUpdateQuery($keyValue, $row)
     {
         $sql = "UPDATE `{$this->tableName}` SET ";
         foreach ($row as $key => $value) {
