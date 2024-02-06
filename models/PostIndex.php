@@ -355,8 +355,15 @@ class PostIndex
      *
      * @throws \Exception If there is an error inserting the value to the dictionary.
      */
-    public function addValueToDictionary($nameDictionary, $value)
+    public function addValueToDictionary($nameDictionary, $value, $checkIfExists = false)
     {
+        if ($checkIfExists) {
+            $query = $this->_db->prepare("SELECT `id` FROM `{$nameDictionary}` WHERE `value` = ?");
+            $query->execute([$value]);
+            if ($query->rowCount() > 0) {
+                return $query->fetchColumn();
+            }
+        }
         $query = $this->_db->prepare("INSERT INTO `{$nameDictionary}` (`value`) VALUES (?)");
         if (!$query->execute([$value])) {
             throw new \Exception("Error insert value {$value} to dictionary {$nameDictionary}");
@@ -553,13 +560,16 @@ class PostIndex
      *
      * @return array An associative array containing the results of processing the required fields.
      */
-    protected function handlingRequiredFields($process = self::ACTION_PROCESSING_INSERT)
+    public function handlingRequiredFields($process = self::ACTION_PROCESSING_INSERT, $isUser = false)
     {
         $resArr = [];
         foreach ($this->requiredFields as $field => $options) {
             if (in_array($process, $options['action']) !== false) {
                 $func = $options['func'];
                 $resArr[$field] = $this->$func();
+                if ($isUser && strtoupper(substr($options['type'], 0, 3)) === 'INT') {
+                    $resArr[$field] = (int)(!$resArr[$field]);
+                }
             }
         }
         return $resArr;
@@ -620,16 +630,17 @@ class PostIndex
 
 
     /**
-     * Generates a prepared SQL insert query for the given table.
+     * Generates the prepared INSERT query for inserting a record into the specified table.
      *
-     * @return string The prepared SQL insert query.
+     * @param array $row (optional) An associative array representing the record to be inserted. If not provided, all fields will be used.
+     * @return string The generated SQL query.
      */
-    public function generatePrepareInsertQuery()
+    public function generatePrepareInsertQuery($row = [])
     {
         $sql = "INSERT INTO `{$this->tableName}` (";
-        $sql .= implode(',', array_keys($this->getAllFields()));
+        $sql .= implode(',', array_keys((count($row) > 0 ? $row : $this->getAllFields())));
         $sql .= ") VALUES (";
-        foreach ($this->getAllFields() as $key => $value) {
+        foreach ((count($row) > 0 ? $row : $this->getAllFields()) as $key => $value) {
             $sql .= ":{$key},";
         }
         $sql = rtrim($sql, ',');
@@ -834,4 +845,13 @@ class PostIndex
         return array_values($this->getListFieldOfDictionariesForSelect($this->arrayOfAddressFields($lang), $withAlias));
     }
 
+
+    public function translit($s)
+    {
+        $s = (string)$s;
+        $s = trim($s);
+        $s = strtr($s, ['а' => 'a', 'б' => 'b', 'в' => 'v', 'г' => 'g', 'д' => 'd', 'е' => 'e', 'ж' => 'j', 'з' => 'z', 'и' => 'y', 'й' => 'y', 'к' => 'k', 'л' => 'l', 'м' => 'm', 'н' => 'n', 'о' => 'o', 'п' => 'p', 'р' => 'r', 'с' => 's', 'т' => 't', 'у' => 'u', 'ф' => 'f', 'х' => 'h', 'ц' => 'c', 'ч' => 'ch', 'ш' => 'sh', 'щ' => 'shch', 'ю' => 'yu', 'я' => 'ya', 'ъ' => '', 'ь' => '', 'і' => 'i', 'ї' => 'i', 'є' => 'e', 'ґ' => 'g', '`' => '', '\'' => '']);
+        $s = strtr($s, ['А' => 'A', 'Б' => 'B', 'В' => 'V', 'Г' => 'G', 'Д' => 'D', 'Е' => 'E', 'Ж' => 'J', 'З' => 'Z', 'И' => 'Y', 'Й' => 'Y', 'К' => 'K', 'Л' => 'L', 'М' => 'M', 'Н' => 'N', 'О' => 'O', 'П' => 'P', 'Р' => 'R', 'С' => 'S', 'Т' => 'T', 'У' => 'U', 'Ф' => 'F', 'Х' => 'H', 'Ц' => 'C', 'Ч' => 'Ch', 'Ш' => 'Sh', 'Щ' => 'Shch', 'Ю' => 'YU', 'Я' => 'YA', 'Ъ' => '', 'Ь' => '', 'І' => 'I', 'Ї' => 'I', 'Є' => 'E', 'Ґ' => 'G']);
+        return $s;
+    }
 }

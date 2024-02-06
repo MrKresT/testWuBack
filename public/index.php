@@ -16,9 +16,11 @@ $app->options('/{routes:.+}', function ($request, $response, $args) {
     return $response;
 });
 
+
 $app->add(function ($request, $handler) {
     $response = $handler->handle($request);
     return $response
+        ->withHeader('Content-Type', 'application/json')
         ->withHeader('Access-Control-Allow-Origin', '*')
         ->withHeader('Access-Control-Allow-Headers', 'X-Requested-With, Content-Type, Accept, Origin, Authorization')
         ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
@@ -106,9 +108,58 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
 
     $response->getBody()->write($payload);
 
-    return $response
-        ->withHeader('Content-Type', 'application/json');
+    return $response;
 });
+
+
+
+$app->get('/postindex/add', function (Request $request, Response $response) {
+    try {
+        $db = \app\models\DBConnection::connect();
+        $modelPostIndex = new \app\models\PostIndex($db);
+
+        $info = $request->getQueryParams();
+        if (array_key_exists($modelPostIndex->getFieldKey(), $info)) {
+            $data = [];
+            foreach ($info as $field => $value) {
+                if (array_key_exists($field . '_id', $modelPostIndex->fields)) {
+                    $data[$field . '_id'] = $modelPostIndex->addValueToDictionary($field, $value, true);
+                    //change ukrainian to english
+                    $data[str_replace("_ukr", '_en', $field) . '_id']
+                        = $modelPostIndex->addValueToDictionary(
+                        str_replace("_ukr", '_en', $field),
+                        $modelPostIndex->translit($value),
+                        true
+                    );
+                } else {
+                    $data[$field] = $value;
+                }
+            }
+
+            //todo милиця, треба для поля district_ukr додати можливость встановлення значення за замовчуванням ''
+            $data['district_old_ukr_id'] = $modelPostIndex->addValueToDictionary('district_old_ukr', '', true);
+
+            $data = array_merge($data, $modelPostIndex->handlingRequiredFields(\app\models\PostIndex::ACTION_PROCESSING_INSERT));
+            $data = array_merge($data, $modelPostIndex->handlingRequiredFields(\app\models\PostIndex::ACTION_PROCESSING_INSERT, true));
+            $sql = $modelPostIndex->generatePrepareInsertQuery($data);
+            $query = $db->prepare($sql);
+            $query->execute($data);
+        }
+        $payload = $data[$modelPostIndex->getFieldKey()];
+
+    } catch (Exception $e) {
+        $payload['error'] = $e->getMessage();
+    } catch (\PDOException $e) {
+        $payload['error'] = 'DB error: ' . $e->getMessage();
+    }
+
+    $payload = json_encode($payload);
+
+    $response->getBody()->write($payload);
+
+    return $response;
+});
+
 
 
 /**
@@ -146,42 +197,9 @@ $app->get('/postindex/{post_office_id}', function (Request $request, Response $r
 
     $response->getBody()->write($payload);
 
-    $response
-        ->withHeader('Content-Type', 'application/json');
     return $response;
 });
 
-
-$app->post('/postindex/add', function (Request $request, Response $response) {
-    try {
-        $db = \app\models\DBConnection::connect();
-        $modelPostIndex = new \app\models\PostIndex($db);
-
-        $datas = $request->getParsedBody();
-        if (array_key_exists('post_office_id', $datas)) {
-            $sql = $modelPostIndex->generatePrepareInsertQuery();
-            $query = $db->prepare($sql);
-            $paramForQuery = [];
-            foreach ($modelPostIndex->getAllFields() as $field => $value) {
-                $paramForQuery[] = $datas[$field];
-            }
-            $query->execute($paramForQuery);
-        }
-        $payload = 'success';
-    } catch (Exception $e) {
-        $payload['error'] = $e->getMessage();
-    } catch (\PDOException $e) {
-        $payload['error'] = 'DB error: ' . $e->getMessage();
-    }
-
-    $payload = json_encode($payload);
-
-    $response->getBody()->write($payload);
-
-    $response
-        ->withHeader('Content-Type', 'application/json');
-    return $response;
-});
 
 $app->delete('/postindex/{post_office_id}', function (Request $request, Response $response, $args) {
     try {
@@ -202,8 +220,6 @@ $app->delete('/postindex/{post_office_id}', function (Request $request, Response
 
     $response->getBody()->write($payload);
 
-    $response
-        ->withHeader('Content-Type', 'application/json');
     return $response;
 });
 
