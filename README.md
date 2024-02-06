@@ -13,4 +13,4 @@ php ./console/update-info.php
 
 API
 сервер треба галаштовувати на папку ./public/
-./public/index.php
+
