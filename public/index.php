@@ -45,6 +45,7 @@ $app->add(function ($request, $handler) {
  */
 $app->get('/postindex', function (Request $request, Response $response, $args) {
     try {
+        $lang = 'ukr';
         $limit = $request->getQueryParams()['limit'] ?? 50;
         $page = $request->getQueryParams()['page'] ?? 1;
         $offset = ($page - 1) * $limit;
@@ -53,11 +54,11 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
         $db = \app\models\DBConnection::connect();
         $modelPostIndex = new \app\models\PostIndex($db);
 
-        $mainSql = "SELECT *, {$modelPostIndex->getExpressionAddressField()} as address FROM `{$modelPostIndex->getTableName()}`";
+        $mainSql = $modelPostIndex->getBaseSelect($lang);
         if ($address) {
             $mainSql .= "WHERE (";
-            foreach ($modelPostIndex->getAddressFields() as $field) {
-                $mainSql .= "`{$field}` LIKE :address OR ";
+            foreach ($modelPostIndex->getAddressFields($lang, false) as $field) {
+                $mainSql .= "{$field} LIKE :address OR ";
             }
             $mainSql = substr($mainSql, 0, -3);
             $mainSql .= ") ";
@@ -65,7 +66,7 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
         } else {
             $mainSql .= " ORDER BY {$modelPostIndex->getFieldKey()} ";
         }
-
+//        $response->getBody()->write($mainSql);
         //total records in result of query
         $sqlCount = "SELECT COUNT(*) FROM ( {$mainSql}) as tmp";
         $queryCount = $db->prepare($sqlCount);
@@ -125,12 +126,14 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
  */
 $app->get('/postindex/{post_office_id}', function (Request $request, Response $response, $args) {
 
+    $lang = 'ukr';
     try {
         $db = \app\models\DBConnection::connect();
 
         $modelPostIndex = new \app\models\PostIndex($db);
+        $mainSql = $modelPostIndex->getBaseSelect($lang);
 
-        $query = $db->prepare("SELECT *, {$modelPostIndex->getExpressionAddressField()} as address  FROM `{$modelPostIndex->getTableName()}` WHERE `{$modelPostIndex->getFieldKey()}` = :{$modelPostIndex->getFieldKey()}");
+        $query = $db->prepare($mainSql . " WHERE `{$modelPostIndex->getFieldKey()}` = :{$modelPostIndex->getFieldKey()}");
         $query->execute([":{$modelPostIndex->getFieldKey()}" => $args['post_office_id']]);
         $payload = $query->fetch(PDO::FETCH_ASSOC);
     } catch (Exception $e) {
@@ -156,7 +159,7 @@ $app->post('/postindex/add', function (Request $request, Response $response) {
 
         $datas = $request->getParsedBody();
         if (array_key_exists('post_office_id', $datas)) {
-            $sql = $modelPostIndex->generateInsertQuery();
+            $sql = $modelPostIndex->generatePrepareInsertQuery();
             $query = $db->prepare($sql);
             $paramForQuery = [];
             foreach ($modelPostIndex->getAllFields() as $field => $value) {
@@ -180,7 +183,7 @@ $app->post('/postindex/add', function (Request $request, Response $response) {
     return $response;
 });
 
-$app->delete('/postindex/{post_office_id}', function (Request $request, Response $response) {
+$app->delete('/postindex/{post_office_id}', function (Request $request, Response $response, $args) {
     try {
         $db = \app\models\DBConnection::connect();
         $modelPostIndex = new \app\models\PostIndex($db);

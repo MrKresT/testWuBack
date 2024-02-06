@@ -5,14 +5,26 @@ namespace app\console;
 use app\helpers\FileHelper;
 use app\helpers\LogHelper;
 use app\models\PostIndex;
-use Box\Spout\Reader\Common\Creator\ReaderEntityFactory;
+
+/**
+ * script for loading info from ukrposhta.ua to database
+ *
+ * php update-info.php 1 (with console log)
+ */
+
+//TODO зробити параметри для повного налаштування скрипта
 
 require __DIR__ . '/../vendor/autoload.php';
 
 $postmanUrl = 'https://www.ukrposhta.ua/files/shares/out/postindex.zip';
+
 $pathPostindex = __DIR__ . '/../public/files/';
+
 $nameFileZipPostindex = $pathPostindex . 'postindex.zip';
+
 $nameFilePostindex = $pathPostindex . 'postindex.xlsx';
+
+$withConsoleLog = (int)($argv[1] ?? 0);
 
 try {
     $db = \app\models\DBConnection::connect();
@@ -30,23 +42,23 @@ if (!file_exists($pathPostindex)) {
 }
 
 //clean old files
-/*try {
+try {
     FileHelper::cleanDir($pathPostindex);
 } catch (\Exception $e) {
     LogHelper::consoleError("Fail cleaning directory {$pathPostindex}: {$e->getMessage()}");
 }
-LogHelper::consoleMessage('Directory cleaned successfully', true);
+$withConsoleLog && LogHelper::consoleMessage('Directory cleaned successfully', true);
 
 //get file from url
 try {
-    FileHelper::loadFromUrl($PostindexUrl, $nameFileZipPostindex, 'wb');
+    FileHelper::loadFromUrl($postmanUrl, $nameFileZipPostindex, 'wb');
 } catch (\Exception $e) {
-    LogHelper::consoleError("Fail loading file from url {$PostindexUrl}: {$e->getMessage()}");
+    LogHelper::consoleError("Fail loading file from url {$postmanUrl}: {$e->getMessage()}");
 }
-LogHelper::consoleMessage('File downloaded successfully', true);*/
+$withConsoleLog && LogHelper::consoleMessage('File downloaded successfully', true);
 
 //unzip files with info
-/*if (!file_exists($nameFileZipPostindex)) {
+if (!file_exists($nameFileZipPostindex)) {
     LogHelper::consoleError("File {$nameFileZipPostindex} not found");
 }
 
@@ -59,26 +71,26 @@ try {
 } catch (\Exception $e) {
     LogHelper::consoleError("Unzip failed: " . $e->getMessage());
 }
-LogHelper::consoleMessage("Unzip successful", true);*/
+$withConsoleLog && LogHelper::consoleMessage("Unzip successful", true);
 
 if (!file_exists($nameFilePostindex)) {
     LogHelper::consoleError("File {$nameFilePostindex} not found");
 }
+$withConsoleLog && LogHelper::consoleMessage('Start at ' . (new \DateTime())->format('Y-m-d H:i:s'), true);
 
 try {
 
     $postIndexObj = new PostIndex($db);
 
-    LogHelper::consoleMessage("Connected successfully", true);
+    $withConsoleLog && LogHelper::consoleMessage("Connected successfully", true);
 
-//check if table exists and create it if not
+    //check if table exists and create it if not
     $postIndexObj->createIfExistTable();
 
-    LogHelper::consoleMessage("Table checked and created successfully", true);
+    $withConsoleLog && LogHelper::consoleMessage("Table checked and created successfully", true);
 
-    $postIndexObj->loadInfoFromXLSXFile($nameFilePostindex, true);
-
-    //associate columns of xlsx with fields of DB
+    //File processing
+    $postIndexObj->loadInfoFromXLSXFile($nameFilePostindex, $withConsoleLog);
 
 } catch (\Exception $e) {
     LogHelper::consoleError($e->getMessage());
@@ -86,4 +98,4 @@ try {
     LogHelper::consoleError("Error on DB: " . $e->getMessage());
 }
 
-echo (new \DateTime())->format('Y-m-d H:i:s') . PHP_EOL;
+$withConsoleLog && LogHelper::consoleMessage('End at ' . (new \DateTime())->format('Y-m-d H:i:s'), true);
