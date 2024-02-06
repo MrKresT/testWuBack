@@ -3,6 +3,7 @@
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Factory\AppFactory;
+use Psr\Http\Server\RequestHandlerInterface as RequestHandler;
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -16,7 +17,22 @@ $app->options('/{routes:.+}', function ($request, $response, $args) {
     return $response;
 });
 
+//middleware adding content for post request to body of request
+$beforeMiddleware = function (Request $request, RequestHandler $handler): Response {
+    $contentType = $request->getHeaderLine('Content-Type');
 
+    if (strpos($contentType, 'application/json') !== false) {
+        $contents = json_decode(file_get_contents('php://input'), true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            $request = $request->withParsedBody($contents);
+        }
+    }
+
+    return $handler->handle($request);
+};
+$app->add($beforeMiddleware);
+
+//middleware adding headers for CORS
 $app->add(function ($request, $handler) {
     $response = $handler->handle($request);
     return $response
@@ -56,6 +72,7 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
         $db = \app\models\DBConnection::connect();
         $modelPostIndex = new \app\models\PostIndex($db);
 
+        //create sql select query
         $mainSql = $modelPostIndex->getBaseSelect($lang);
         if ($address) {
             $mainSql .= "WHERE (";
@@ -68,7 +85,7 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
         } else {
             $mainSql .= " ORDER BY {$modelPostIndex->getFieldKey()} ";
         }
-//        $response->getBody()->write($mainSql);
+
         //total records in result of query
         $sqlCount = "SELECT COUNT(*) FROM ( {$mainSql}) as tmp";
         $queryCount = $db->prepare($sqlCount);
@@ -83,7 +100,7 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
             $offset = (int)ceil($totalRecord / $limit) === 0 ? 0 : ((int)ceil($totalRecord / $limit) - 1) * $limit;
         }
 
-//        $response->getBody()->write('total record '.$totalRecord.' totalPages'.(int)round($totalRecord / $limit).' offset '.$offset.' limit '.$limit.' page '.(int)($offset/$limit));
+        //main query with limit and offset
         $query = $db->prepare("SELECT * FROM ( {$mainSql}) as tmp LIMIT :limit OFFSET :offset ");
         $query->bindParam(':limit', $limit, PDO::PARAM_INT);
         $query->bindParam(':offset', $offset, PDO::PARAM_INT);
@@ -92,6 +109,7 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
             $query->bindParam(':address', $address);;
         }
         $query->execute();
+
         $payload = [
             'data' => $query->fetchAll(PDO::FETCH_ASSOC),
             'totalPages' => (int)ceil($totalRecord / $limit),
@@ -111,15 +129,25 @@ $app->get('/postindex', function (Request $request, Response $response, $args) {
     return $response;
 });
 
-
-
-$app->get('/postindex/add', function (Request $request, Response $response) {
+/**
+ * POST /postindex/add
+ *
+ * input data <field>=><value> for dictionary must have name table in <field>
+ *
+ * adding data to the table where store info about post index
+ *
+ * Work for ukrainian
+ *
+ * @param Request $request The Slim Framework request object.
+ * @param Response $response The Slim Framework response object.
+ */
+$app->post('/postindex/add', function (Request $request, Response $response) {
     try {
         $db = \app\models\DBConnection::connect();
         $modelPostIndex = new \app\models\PostIndex($db);
 
-        $info = $request->getQueryParams();
-        if (array_key_exists($modelPostIndex->getFieldKey(), $info)) {
+        $info = $request->getParsedBody();
+        if ($info && array_key_exists($modelPostIndex->getFieldKey(), $info)) {
             $data = [];
             foreach ($info as $field => $value) {
                 if (array_key_exists($field . '_id', $modelPostIndex->fields)) {
@@ -139,13 +167,17 @@ $app->get('/postindex/add', function (Request $request, Response $response) {
             //todo милиця, треба для поля district_ukr додати можливость встановлення значення за замовчуванням ''
             $data['district_old_ukr_id'] = $modelPostIndex->addValueToDictionary('district_old_ukr', '', true);
 
-            $data = array_merge($data, $modelPostIndex->handlingRequiredFields(\app\models\PostIndex::ACTION_PROCESSING_INSERT));
+            //create array <field> => <value> with extra field
             $data = array_merge($data, $modelPostIndex->handlingRequiredFields(\app\models\PostIndex::ACTION_PROCESSING_INSERT, true));
+
+            //insert
             $sql = $modelPostIndex->generatePrepareInsertQuery($data);
             $query = $db->prepare($sql);
             $query->execute($data);
+            $payload = $data[$modelPostIndex->getFieldKey()];
+        } else {
+            $payload['error'] = 'Empty data';
         }
-        $payload = $data[$modelPostIndex->getFieldKey()];
 
     } catch (Exception $e) {
         $payload['error'] = $e->getMessage();
@@ -159,7 +191,6 @@ $app->get('/postindex/add', function (Request $request, Response $response) {
 
     return $response;
 });
-
 
 
 /**
@@ -200,7 +231,15 @@ $app->get('/postindex/{post_office_id}', function (Request $request, Response $r
     return $response;
 });
 
-
+/**
+ * DELETE /postindex/{post_office_id}
+ *
+ * delete record by value (post_office_id) of post index from the table where store info about post index
+ *
+ * @param Request $request The Slim Framework request object.
+ * @param Response $response The Slim Framework response object.
+ * @param array $args
+ */
 $app->delete('/postindex/{post_office_id}', function (Request $request, Response $response, $args) {
     try {
         $db = \app\models\DBConnection::connect();
@@ -223,6 +262,12 @@ $app->delete('/postindex/{post_office_id}', function (Request $request, Response
     return $response;
 });
 
+
+/**
+ * GET /{slug}
+ *
+ * Wrong request
+ */
 $app->get('/{slug}', function (Request $request, Response $response, $args) {
     $response->getBody()->write('Wrong request');
     $response->withStatus(404);

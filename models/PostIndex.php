@@ -271,6 +271,8 @@ class PostIndex
         $withConsoleLog && LogHelper::consoleMessage("File {$fileName} loaded successfully", true);
 
         $this->updateTablePostindex($worksheet, $withConsoleLog);
+
+        $readerXLSX->close();
     }
 
     /**
@@ -427,80 +429,90 @@ class PostIndex
             throw new \Exception("Not found field in header column in XLSX file");
         }
 
-        //load data form DB from Dictionaries
+        try {
+            $this->_db->beginTransaction();
+            //load data form DB from Dictionaries
 
-        $fieldToDictionary = $this->getDictionaries();
+            $fieldToDictionary = $this->getDictionaries();
 
-        /**
-         * full this structure
-         * $dictionaries=[
-         *      <name-dictionary> => [
-         *              <id> => <value>,
-         *      ]
-         * ]
-         */
-        $dictionaries = [];
-        foreach ($fieldToDictionary as $dictionary) {
-            $dictionaries[$dictionary] = [];
-            $query = $this->_db->query("SELECT * FROM `{$dictionary}`");
-            $data = $query->fetchAll(\PDO::FETCH_ASSOC);
-            foreach ($data as $row) {
-                $dictionaries[$dictionary][$row['id']] = $row['value'];
-            }
-        }
-
-        //for load data from XLS
-        $postsFromFile = [];
-        //for delete unused post indexes
-        $usedPostIndexes = [];
-        //update DB
-        foreach ($worksheet->getRowIterator() as $rowIndexCurrent => $row) {
-
-            if ($rowIndex > $rowIndexCurrent || count($row->getCells()) === 0) {
-                continue;
+            /**
+             * full this structure
+             * $dictionaries=[
+             *      <name-dictionary> => [
+             *              <id> => <value>,
+             *      ]
+             * ]
+             */
+            $dictionaries = [];
+            foreach ($fieldToDictionary as $dictionary) {
+                $dictionaries[$dictionary] = [];
+                $query = $this->_db->query("SELECT * FROM `{$dictionary}`");
+                $data = $query->fetchAll(\PDO::FETCH_ASSOC);
+                foreach ($data as $row) {
+                    $dictionaries[$dictionary][$row['id']] = $row['value'];
+                }
             }
 
-            $cellIterator = $row->getCells();
+            //for load data from XLS
+            $postsFromFile = [];
+            //for delete unused post indexes
+            $usedPostIndexes = [];
+            //update DB
+            foreach ($worksheet->getRowIterator() as $rowIndexCurrent => $row) {
 
-            //skip rows with empty cell of key
-            if (!$postOfficeId = $cellIterator[$keyRowIndex]->getValue()) {
-                continue;
+                if ($rowIndex > $rowIndexCurrent || count($row->getCells()) === 0) {
+                    continue;
+                }
+
+                $cellIterator = $row->getCells();
+
+                //skip rows with empty cell of key
+                if (!$postOfficeId = $cellIterator[$keyRowIndex]->getValue()) {
+                    continue;
+                }
+
+                //select post index for delete unused post indexes in DB
+                $usedPostIndexes[] = $postOfficeId;
+                $post = [];
+
+                foreach ($columnHeaderToFieldDB as $numCell => $field) {
+
+                    //get data from XLS, if value from dictionary - check and update - input id of dictionary, else get value
+                    $post[$field] = $this->isFieldFromDictionary($field)
+                        ? $this->checkAndUpdateDictionary($fieldToDictionary[$field], $cellIterator[$numCell]->getValue(), $dictionaries)
+                        : $cellIterator[$numCell]->getValue();
+                }
+
+                $postsFromFile[$postOfficeId] = array_merge($post);
+
+                //check and apply data, data check and load to DB become of chunks, which define in $this->countQueries
+                if (count($postsFromFile) === $this->countQueries) {
+                    $this->checkAndApplyData($postsFromFile, $withConsoleLog);
+                    $postsFromFile = [];
+                }
             }
-
-            //select post index for delete unused post indexes in DB
-            $usedPostIndexes[] = $postOfficeId;
-            $post = [];
-
-            foreach ($columnHeaderToFieldDB as $numCell => $field) {
-
-                //get data from XLS, if value from dictionary - check and update - input id of dictionary, else get value
-                $post[$field] = $this->isFieldFromDictionary($field)
-                    ? $this->checkAndUpdateDictionary($fieldToDictionary[$field], $cellIterator[$numCell]->getValue(), $dictionaries)
-                    : $cellIterator[$numCell]->getValue();
-            }
-
-            $postsFromFile[$postOfficeId] = array_merge($post);
-
-            //check and apply data, data check and load to DB become of chunks, which define in $this->countQueries
-            if (count($postsFromFile) === $this->countQueries) {
+            $withConsoleLog && LogHelper::consoleMessage("1");
+            if (count($postsFromFile) > 0) {
                 $this->checkAndApplyData($postsFromFile, $withConsoleLog);
-                $postsFromFile = [];
             }
+
+            $withConsoleLog && LogHelper::consoleMessage("Deleting unused indexes from DB");
+
+            //delete unused post indexes
+            $this->findAndDeleteUnusedPostindex($usedPostIndexes);
+
+            $this->_db->commit();
+            $withConsoleLog && LogHelper::consoleMessage("Unused indexes from DB were deleted successfully", true);
+
+            $withConsoleLog && LogHelper::consoleMessage("Update data for DB was successful", true);
+            $withConsoleLog && LogHelper::consoleMessage('Rows: ' . $rowIndexCurrent);
+        } catch (\Exception $e) {
+            $this->_db->rollBack();
+            LogHelper::consoleError("Error while processing: " . $e->getMessage());
+        } catch (\PDOException $e) {
+            $this->_db->rollBack();
+            LogHelper::consoleError("Error on DB: " . $e->getMessage());
         }
-        $withConsoleLog && LogHelper::consoleMessage("1");
-        if (count($postsFromFile) > 0) {
-            $this->checkAndApplyData($postsFromFile, $withConsoleLog);
-        }
-
-        $withConsoleLog && LogHelper::consoleMessage("Deleting unused indexes from DB");
-
-        //delete unused post indexes
-        $this->findAndDeleteUnusedPostindex($usedPostIndexes);
-
-        $withConsoleLog && LogHelper::consoleMessage("Unused indexes from DB were deleted successfully", true);
-
-        $withConsoleLog && LogHelper::consoleMessage("Update data for DB was successful", true);
-        $withConsoleLog && LogHelper::consoleMessage('Rows: ' . $rowIndexCurrent);
     }
 
     /**
@@ -554,11 +566,11 @@ class PostIndex
 
 
     /**
-     * Handles the required fields for a particular process.
+     * Handles the required fields based on the given process and user flag.
      *
-     * @param string $process The process to handle the required fields for. Defaults to ACTION_PROCESSING_INSERT.
-     *
-     * @return array An associative array containing the results of processing the required fields.
+     * @param string $process The process to handle the required fields for. Default is ACTION_PROCESSING_INSERT.
+     * @param bool $isUser Indicates whether the handle is for user. Default is false.
+     * @return array The array of handled required fields.
      */
     public function handlingRequiredFields($process = self::ACTION_PROCESSING_INSERT, $isUser = false)
     {
@@ -761,17 +773,19 @@ class PostIndex
     }
 
     /**
-     * Returns the base SELECT statement for querying records from the specified table.
+     * Retrieves the base SQL SELECT statement for the given language.
      *
-     * @param string $lang The language code for which to retrieve the fields.
-     * @param bool $withAddress (optional) Whether to include the address field.
-     * @return string The generated SQL query.
+     * @param string $lang The language code to retrieve the fields for.
+     * @param bool $withAddress Indicates whether to include the address field in the SELECT statement. Default is true.
+     * @return string The base SQL SELECT statement.
      */
-    public function getBaseSelect($lang, $withAddress = false)
+    public function getBaseSelect($lang, $withAddress = true)
     {
 //        $fields = $this->getListFieldOfDictionariesForSelect($this->getFieldsByLang($lang));
         $fields = $this->getFieldsWithoutDictionary();
-        $fields[] = $this->getExpressionAddressField($lang);
+        if ($withAddress) {
+            $fields[] = $this->getExpressionAddressField($lang);
+        }
         $join = $this->getJoinOfDictionariesForSelect($this->getFieldsByLang($lang));
 
 
@@ -846,6 +860,12 @@ class PostIndex
     }
 
 
+    /**
+     * Transliterates a string by replacing Cyrillic characters with their Latin equivalents.
+     *
+     * @param string $s The string to transliterate.
+     * @return string The transliterated string.
+     */
     public function translit($s)
     {
         $s = (string)$s;
